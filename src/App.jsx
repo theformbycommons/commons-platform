@@ -185,4 +185,214 @@ function App() {
 
     return directReplies.reduce(
       (total, reply) =>
-        total + 1 + countReplies(reply
+        total + 1 + countReplies(reply.id),
+      0
+    )
+  }
+
+  function toggleThread(messageId) {
+    setCollapsedThreads(prev => ({
+      ...prev,
+      !prev[messageId],
+    }))
+  }
+
+  function formatDate(dateString) {
+    return new Date(dateString).toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  function renderMessageTree(msg, depth = 0) {
+    const replies = getReplies(msg.id)
+    const isCollapsed = collapsedThreads[msg.id]
+    const replyCount = countReplies(msg.id)
+
+    return (
+      <div key={msg.id}>
+        <div
+          style={{
+            border: '1px solid #ddd',
+            padding: '10px',
+            marginBottom: '10px',
+            borderRadius: '6px',
+            marginLeft: `${depth * 40}px`,
+            background: depth > 0 ? '#f8f8f8' : '#ffffff',
+          }}
+        >
+          <strong>
+            {profiles[msg.author_id] || 'Unknown Member'}
+          </strong>
+
+          <br />
+
+          <small>
+            {formatDate(msg.created_at)}
+          </small>
+
+          <p>{msg.body}</p>
+
+          {replyCount > 0 && (
+            <button
+              onClick={() => toggleThread(msg.id)}
+              style={{ marginRight: '8px' }}
+            >
+              {isCollapsed
+                ? `Expand (${replyCount})`
+                : `Collapse (${replyCount})`}
+            </button>
+          )}
+
+          <button
+            onClick={() => setReplyingTo(msg)}
+          >
+            Reply
+          </button>
+
+          {replyingTo?.id === msg.id && (
+            <form onSubmit={handleReply}>
+              <br />
+
+              <textarea
+                rows="3"
+                style={{ width: '100%' }}
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Write a reply..."
+              />
+
+              <br />
+
+              <button type="submit">
+                Post Reply
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setReplyingTo(null)
+                  setReplyText('')
+                }}
+                style={{ marginLeft: '8px' }}
+              >
+                Cancel
+              </button>
+            </form>
+          )}
+        </div>
+
+        {!isCollapsed &&
+          replies.map(reply =>
+            renderMessageTree(reply, depth + 1)
+          )}
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <div style={{ maxWidth: '400px', margin: '50px auto' }}>
+        <h1>The Formby Commons</h1>
+
+        <form onSubmit={handleLogin}>
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          <button type="submit">
+            Sign In
+          </button>
+        </form>
+
+        <p>{message}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ maxWidth: '900px', margin: '50px auto' }}>
+      <h1>The Formby Commons</h1>
+
+      <p>
+        Logged in as: {session.user.email}
+      </p>
+
+      <button onClick={handleLogout}>
+        Sign Out
+      </button>
+
+      <hr />
+
+      <h2>Rooms</h2>
+
+      {rooms.map((room) => (
+        <button
+          key={room.id}
+          onClick={() => selectRoom(room)}
+          style={{
+            display: 'block',
+            marginBottom: '10px',
+            fontWeight:
+              selectedRoom?.id === room.id
+                ? 'bold'
+                : 'normal',
+          }}
+        >
+          {room.name}
+        </button>
+      ))}
+
+      {selectedRoom && (
+        <>
+          <hr />
+
+          <h2>{selectedRoom.name}</h2>
+
+          <form onSubmit={handlePost}>
+            <textarea
+              rows="4"
+              style={{ width: '100%' }}
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              placeholder="Write a message..."
+            />
+
+            <button type="submit">
+              Post Message
+            </button>
+          </form>
+
+          <hr />
+
+          {messages.length === 0 && (
+            <p>No messages yet.</p>
+          )}
+
+          {getRootMessages().map(msg =>
+            renderMessageTree(msg)
+          )}
+        </>
+      )}
+
+      {message && (
+        <p>{message}</p>
+      )}
+    </div>
+  )
+}
+
+export default App
