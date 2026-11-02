@@ -190,12 +190,12 @@ function App() {
     )
   }
 
-  function toggleThread(messageId) {
-    setCollapsedThreads(prev => ({
-      ...prev,
-      !prev[messageId],
-    }))
-  }
+function toggleThread(messageId) {
+  setCollapsedThreads(prev => ({
+    ...prev,
+    [messageId]: !prev[messageId],
+  }))
+}
 
   function formatDate(dateString) {
     return new Date(dateString).toLocaleString('en-GB', {
