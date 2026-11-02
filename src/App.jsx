@@ -143,6 +143,70 @@ function App() {
     await loadMessages(selectedRoom.id)
   }
 
+  function getRootMessages() {
+    return messages.filter(msg => msg.parent_id === null)
+  }
+
+  function getReplies(parentId) {
+    return messages.filter(msg => msg.parent_id === parentId)
+  }
+
+  function renderMessageTree(msg, depth = 0) {
+    const replies = getReplies(msg.id)
+
+    return (
+      <div key={msg.id}>
+        <div
+          style={{
+            border: '1px solid #ddd',
+            padding: '10px',
+            marginBottom: '10px',
+            borderRadius: '6px',
+            marginLeft: `${depth * 40}px`,
+            background: depth > 0 ? '#f8f8f8' : '#ffffff',
+          }}
+        >
+          <p>{msg.body}</p>
+
+          <small>{msg.created_at}</small>
+
+          <br />
+          <br />
+
+          <button
+            onClick={() => setReplyingTo(msg)}
+          >
+            Reply
+          </button>
+
+          {replyingTo?.id === msg.id && (
+            <form onSubmit={handleReply}>
+              <br />
+
+              <textarea
+                rows="3"
+                style={{ width: '100%' }}
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Write a reply..."
+              />
+
+              <br />
+
+              <button type="submit">
+                Post Reply
+              </button>
+            </form>
+          )}
+        </div>
+
+        {replies.map(reply =>
+          renderMessageTree(reply, depth + 1)
+        )}
+      </div>
+    )
+  }
+
   if (!session) {
     return (
       <div style={{ maxWidth: '400px', margin: '50px auto' }}>
@@ -225,54 +289,9 @@ function App() {
             <p>No messages yet.</p>
           )}
 
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              style={{
-                border: '1px solid #ddd',
-                padding: '10px',
-                marginBottom: '10px',
-                borderRadius: '6px',
-                marginLeft: msg.parent_id ? '40px' : '0',
-                background: msg.parent_id ? '#f8f8f8' : '#ffffff',
-              }}
-            >
-              <p>{msg.body}</p>
-
-              <small>
-                {msg.created_at}
-              </small>
-
-              <br />
-              <br />
-
-              <button
-                onClick={() => setReplyingTo(msg)}
-              >
-                Reply
-              </button>
-
-              {replyingTo?.id === msg.id && (
-                <form onSubmit={handleReply}>
-                  <br />
-
-                  <textarea
-                    rows="3"
-                    style={{ width: '100%' }}
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    placeholder="Write a reply..."
-                  />
-
-                  <br />
-
-                  <button type="submit">
-                    Post Reply
-                  </button>
-                </form>
-              )}
-            </div>
-          ))}
+          {getRootMessages().map(msg =>
+            renderMessageTree(msg)
+          )}
         </>
       )}
 
