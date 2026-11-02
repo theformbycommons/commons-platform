@@ -13,6 +13,9 @@ function App() {
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
 
+  const [replyingTo, setReplyingTo] = useState(null)
+  const [replyText, setReplyText] = useState('')
+
   useEffect(() => {
     async function loadSession() {
       const { data } = await supabase.auth.getSession()
@@ -114,6 +117,32 @@ function App() {
     await loadMessages(selectedRoom.id)
   }
 
+  async function handleReply(e) {
+    e.preventDefault()
+
+    if (!replyText.trim()) return
+
+    const { error } = await supabase
+      .from('messages')
+      .insert({
+        room_id: selectedRoom.id,
+        author_id: session.user.id,
+        body: replyText,
+        parent_id: replyingTo.id,
+        root_id: replyingTo.root_id || replyingTo.id,
+      })
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    setReplyText('')
+    setReplyingTo(null)
+
+    await loadMessages(selectedRoom.id)
+  }
+
   if (!session) {
     return (
       <div style={{ maxWidth: '400px', margin: '50px auto' }}>
@@ -204,6 +233,8 @@ function App() {
                 padding: '10px',
                 marginBottom: '10px',
                 borderRadius: '6px',
+                marginLeft: msg.parent_id ? '40px' : '0',
+                background: msg.parent_id ? '#f8f8f8' : '#ffffff',
               }}
             >
               <p>{msg.body}</p>
@@ -211,6 +242,35 @@ function App() {
               <small>
                 {msg.created_at}
               </small>
+
+              <br />
+              <br />
+
+              <button
+                onClick={() => setReplyingTo(msg)}
+              >
+                Reply
+              </button>
+
+              {replyingTo?.id === msg.id && (
+                <form onSubmit={handleReply}>
+                  <br />
+
+                  <textarea
+                    rows="3"
+                    style={{ width: '100%' }}
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    placeholder="Write a reply..."
+                  />
+
+                  <br />
+
+                  <button type="submit">
+                    Post Reply
+                  </button>
+                </form>
+              )}
             </div>
           ))}
         </>
