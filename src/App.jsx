@@ -11,6 +11,8 @@ function App() {
   const [selectedRoom, setSelectedRoom] = useState(null)
 
   const [messages, setMessages] = useState([])
+  const [profiles, setProfiles] = useState({})
+
   const [newMessage, setNewMessage] = useState('')
 
   const [replyingTo, setReplyingTo] = useState(null)
@@ -67,6 +69,29 @@ function App() {
     }
 
     setMessages(data || [])
+
+    const authorIds = [
+      ...new Set(
+        (data || [])
+          .map(msg => msg.author_id)
+          .filter(Boolean)
+      ),
+    ]
+
+    if (authorIds.length > 0) {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, display_name')
+        .in('id', authorIds)
+
+      const profileMap = {}
+
+      ;(profileData || []).forEach(profile => {
+        profileMap[profile.id] = profile.display_name
+      })
+
+      setProfiles(profileMap)
+    }
   }
 
   async function selectRoom(room) {
@@ -93,6 +118,7 @@ function App() {
     setSelectedRoom(null)
     setMessages([])
     setRooms([])
+    setProfiles({})
   }
 
   async function handlePost(e) {
@@ -151,6 +177,16 @@ function App() {
     return messages.filter(msg => msg.parent_id === parentId)
   }
 
+  function formatDate(dateString) {
+    return new Date(dateString).toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
   function renderMessageTree(msg, depth = 0) {
     const replies = getReplies(msg.id)
 
@@ -166,12 +202,17 @@ function App() {
             background: depth > 0 ? '#f8f8f8' : '#ffffff',
           }}
         >
+          <strong>
+            {profiles[msg.author_id] || 'Unknown Member'}
+          </strong>
+
+          <br />
+
+          <small>
+            {formatDate(msg.created_at)}
+          </small>
+
           <p>{msg.body}</p>
-
-          <small>{msg.created_at}</small>
-
-          <br />
-          <br />
 
           <button
             onClick={() => setReplyingTo(msg)}
