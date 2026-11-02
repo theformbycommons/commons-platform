@@ -10,6 +10,9 @@ function App() {
   const [rooms, setRooms] = useState([])
   const [selectedRoom, setSelectedRoom] = useState(null)
 
+  const [newRoomName, setNewRoomName] = useState('')
+  const [newRoomDescription, setNewRoomDescription] = useState('')
+
   const [messages, setMessages] = useState([])
   const [profiles, setProfiles] = useState({})
 
@@ -171,6 +174,31 @@ function App() {
 
     await loadMessages(selectedRoom.id)
   }
+
+  async function handleCreateRoom(e) {
+  e.preventDefault()
+
+  if (!newRoomName.trim()) return
+
+  const { error } = await supabase
+    .from('rooms')
+    .insert({
+      name: newRoomName,
+      description: newRoomDescription,
+      created_by: session.user.id,
+      is_general: false,
+    })
+
+  if (error) {
+    setMessage(error.message)
+    return
+  }
+
+  setNewRoomName('')
+  setNewRoomDescription('')
+
+  await loadRooms()
+}
 
   function getRootMessages() {
     return messages.filter(msg => msg.parent_id === null)
@@ -338,6 +366,38 @@ function toggleThread(messageId) {
       <hr />
 
       <h2>Rooms</h2>
+
+      <hr />
+
+<h3>Create Room</h3>
+
+<form onSubmit={handleCreateRoom}>
+  <input
+    type="text"
+    placeholder="Room name"
+    value={newRoomName}
+    onChange={(e) => setNewRoomName(e.target.value)}
+  />
+
+  <br />
+  <br />
+
+  <textarea
+    rows="3"
+    style={{ width: '100%' }}
+    placeholder="Room description"
+    value={newRoomDescription}
+    onChange={(e) => setNewRoomDescription(e.target.value)}
+  />
+
+  <br />
+
+  <button type="submit">
+    Create Room
+  </button>
+</form>
+
+<hr />
 
       {rooms.map((room) => (
         <button
