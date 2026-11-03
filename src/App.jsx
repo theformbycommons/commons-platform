@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase'
 
 function App() {
   const [session, setSession] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
@@ -15,6 +16,7 @@ function App() {
 
   const [messages, setMessages] = useState([])
   const [profiles, setProfiles] = useState({})
+  const [memberList, setMemberList] = useState([])
 
   const [newMessage, setNewMessage] = useState('')
 
@@ -26,6 +28,48 @@ function App() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [forcePasswordChange, setForcePasswordChange] = useState(false)
+
+  const [activeView, setActiveView] = useState('chat')
+
+  async function loadProfile() {
+    if (!session?.user?.id) return
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, email, is_admin, must_change_password')
+      .eq('id', session.user.id)
+      .maybeSingle()
+
+    if (error || !data) {
+      setProfile({
+        id: session.user.id,
+        display_name: session.user.email?.split('@')[0] || 'Member',
+        email: session.user.email,
+        is_admin: false,
+        must_change_password: false,
+      })
+      setForcePasswordChange(false)
+      return
+    }
+
+    setProfile(data)
+    setForcePasswordChange(Boolean(data.must_change_password))
+  }
+
+  async function loadMembers() {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, email, is_admin, created_at')
+      .order('display_name', { ascending: true })
+
+    if (error) {
+      setMemberList([])
+      return
+    }
+
+    setMemberList(data || [])
+  }
 
   useEffect(() => {
     async function loadSession() {
@@ -46,9 +90,17 @@ function App() {
 
   useEffect(() => {
     if (session) {
+      loadProfile()
       loadRooms()
+      loadMembers()
     }
   }, [session])
+
+  useEffect(() => {
+    if (session && profile && !profile.is_admin && activeView === 'admin') {
+      setActiveView('chat')
+    }
+  }, [session, profile, activeView])
 
   async function loadRooms() {
     const { data, error } = await supabase
@@ -95,8 +147,8 @@ function App() {
 
       const profileMap = {}
 
-      ;(profileData || []).forEach(profile => {
-        profileMap[profile.id] = profile.display_name
+      ;(profileData || []).forEach(profileItem => {
+        profileMap[profileItem.id] = profileItem.display_name
       })
 
       setProfiles(profileMap)
@@ -111,19 +163,25 @@ function App() {
   async function handleLogin(e) {
     e.preventDefault()
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
     if (error) {
       setMessage(error.message)
+      return
     }
+
+    setSession(data.session)
+    setPassword('')
   }
 
   async function handleLogout() {
     await supabase.auth.signOut()
 
+    setSession(null)
+    setProfile(null)
     setSelectedRoom(null)
     setMessages([])
     setRooms([])
@@ -132,6 +190,8 @@ function App() {
     setCurrentPassword('')
     setNewPassword('')
     setConfirmPassword('')
+    setForcePasswordChange(false)
+    setActiveView('chat')
   }
 
   async function handlePasswordChange(e) {
@@ -176,9 +236,21 @@ function App() {
       return
     }
 
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({ must_change_password: false })
+      .eq('id', session.user.id)
+
+    if (profileError) {
+      setMessage(profileError.message)
+      return
+    }
+
     setCurrentPassword('')
     setNewPassword('')
     setConfirmPassword('')
+    setForcePasswordChange(false)
+    await loadProfile()
     setMessage('Password updated successfully.')
   }
 
@@ -253,6 +325,77 @@ function App() {
     setNewRoomDescription('')
 
     await loadRooms()
+  }
+
+  async function handleMemberToggleAdmin(memberId, nextValue) {
+    if (!profile?.is_admin) return
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_admin: nextValue })
+      .eq('id', memberId)
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    await loadMembers()
+  }
+
+  async function handleMemberDelete(memberId) {
+    if (!profile?.is_admin) return
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_deleted: true, is_admin: false })
+      .eq('id', memberId)
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    await loadMembers()
+  }
+
+  async function handleDeleteRoom(roomId) {
+    if (!profile?.is_admin) return
+
+    const { error } = await supabase
+      .from('rooms')
+      .delete()
+      .eq('id', roomId)
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    if (selectedRoom?.id === roomId) {
+      setSelectedRoom(null)
+      setMessages([])
+    }
+
+    await loadRooms()
+  }
+
+  async function handleDeleteMessage(messageId) {
+    if (!profile?.is_admin && messageId) return
+
+    const { error } = await supabase
+      .from('messages')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', messageId)
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    if (selectedRoom) {
+      await loadMessages(selectedRoom.id)
+    }
   }
 
   function getRootMessages() {
@@ -330,11 +473,15 @@ function App() {
             </button>
           )}
 
-          <button
-            onClick={() => setReplyingTo(msg)}
-          >
+          <button onClick={() => setReplyingTo(msg)} style={{ marginRight: '8px' }}>
             Reply
           </button>
+
+          {profile?.is_admin && (
+            <button onClick={() => handleDeleteMessage(msg.id)}>
+              Delete message
+            </button>
+          )}
 
           {replyingTo?.id === msg.id && (
             <form onSubmit={handleReply}>
@@ -406,132 +553,265 @@ function App() {
     )
   }
 
+  if (forcePasswordChange) {
+    return (
+      <div style={{ maxWidth: '500px', margin: '50px auto' }}>
+        <h1>Change your password</h1>
+        <p>This is your first login. Please set a new password to continue.</p>
+
+        <form onSubmit={handlePasswordChange}>
+          <input
+            type="password"
+            placeholder="Current password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
+
+          <input
+            type="password"
+            placeholder="New password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+
+          <input
+            type="password"
+            placeholder="Confirm new password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+
+          <button type="submit">
+            Save new password
+          </button>
+        </form>
+
+        {message && <p>{message}</p>}
+      </div>
+    )
+  }
+
   return (
-    <div style={{ maxWidth: '900px', margin: '50px auto' }}>
+    <div style={{ maxWidth: '1100px', margin: '50px auto' }}>
       <h1>The Formby Commons</h1>
 
       <p>
         Logged in as: {session.user.email}
       </p>
 
-      <button onClick={handleLogout}>
-        Sign Out
-      </button>
-
-      <hr />
-
-      <h2>Account</h2>
-
-      <form onSubmit={handlePasswordChange}>
-        <input
-          type="password"
-          placeholder="Current password"
-          value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
-        />
-
-        <input
-          type="password"
-          placeholder="New password"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-        />
-
-        <input
-          type="password"
-          placeholder="Confirm new password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-        />
-
-        <button type="submit">
-          Change Password
+      <div style={{ marginBottom: '1rem' }}>
+        <button onClick={handleLogout} style={{ marginRight: '8px' }}>
+          Sign Out
         </button>
-      </form>
 
-      <hr />
-
-      <h2>Rooms</h2>
-
-      <hr />
-
-      <h3>Create Room</h3>
-
-      <form onSubmit={handleCreateRoom}>
-        <input
-          type="text"
-          placeholder="Room name"
-          value={newRoomName}
-          onChange={(e) => setNewRoomName(e.target.value)}
-        />
-
-        <br />
-        <br />
-
-        <textarea
-          rows="3"
-          style={{ width: '100%' }}
-          placeholder="Room description"
-          value={newRoomDescription}
-          onChange={(e) => setNewRoomDescription(e.target.value)}
-        />
-
-        <br />
-
-        <button type="submit">
-          Create Room
-        </button>
-      </form>
-
-      <hr />
-
-      {rooms.map((room) => (
         <button
-          key={room.id}
-          onClick={() => selectRoom(room)}
-          style={{
-            display: 'block',
-            marginBottom: '10px',
-            fontWeight:
-              selectedRoom?.id === room.id
-                ? 'bold'
-                : 'normal',
-          }}
+          onClick={() => setActiveView('chat')}
+          style={{ marginRight: '8px' }}
         >
-          {room.name}
+          Chat
         </button>
-      ))}
 
-      {selectedRoom && (
+        {profile?.is_admin && (
+          <button onClick={() => setActiveView('admin')}>
+            Admin
+          </button>
+        )}
+      </div>
+
+      <hr />
+
+      {activeView === 'chat' && (
         <>
-          <hr />
+          <h2>Account</h2>
 
-          <h2>{selectedRoom.name}</h2>
+          <form onSubmit={handlePasswordChange}>
+            <input
+              type="password"
+              placeholder="Current password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+            />
 
-          <form onSubmit={handlePost}>
-            <textarea
-              rows="4"
-              style={{ width: '100%' }}
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Write a message..."
+            <input
+              type="password"
+              placeholder="New password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+
+            <input
+              type="password"
+              placeholder="Confirm new password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
             />
 
             <button type="submit">
-              Post Message
+              Change Password
             </button>
           </form>
 
           <hr />
 
-          {messages.length === 0 && (
-            <p>No messages yet.</p>
+          <h2>Rooms</h2>
+
+          {profile?.is_admin && (
+            <>
+              <h3>Create Room</h3>
+
+              <form onSubmit={handleCreateRoom}>
+                <input
+                  type="text"
+                  placeholder="Room name"
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                />
+
+                <br />
+                <br />
+
+                <textarea
+                  rows="3"
+                  style={{ width: '100%' }}
+                  placeholder="Room description"
+                  value={newRoomDescription}
+                  onChange={(e) => setNewRoomDescription(e.target.value)}
+                />
+
+                <br />
+
+                <button type="submit">
+                  Create Room
+                </button>
+              </form>
+
+              <hr />
+            </>
           )}
 
-          {getRootMessages().map(msg =>
-            renderMessageTree(msg)
+          {rooms.map((room) => (
+            <div key={room.id} style={{ marginBottom: '10px' }}>
+              <button
+                onClick={() => selectRoom(room)}
+                style={{
+                  display: 'block',
+                  marginBottom: '6px',
+                  fontWeight:
+                    selectedRoom?.id === room.id
+                      ? 'bold'
+                      : 'normal',
+                }}
+              >
+                {room.name}
+              </button>
+
+              {profile?.is_admin && (
+                <button onClick={() => handleDeleteRoom(room.id)}>
+                  Delete room
+                </button>
+              )}
+            </div>
+          ))}
+
+          {selectedRoom && (
+            <>
+              <hr />
+
+              <h2>{selectedRoom.name}</h2>
+
+              <form onSubmit={handlePost}>
+                <textarea
+                  rows="4"
+                  style={{ width: '100%' }}
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Write a message..."
+                />
+
+                <button type="submit">
+                  Post Message
+                </button>
+              </form>
+
+              <hr />
+
+              {messages.length === 0 && (
+                <p>No messages yet.</p>
+              )}
+
+              {getRootMessages().map(msg =>
+                renderMessageTree(msg)
+              )}
+            </>
           )}
         </>
+      )}
+
+      {activeView === 'admin' && profile?.is_admin && (
+        <div>
+          <h2>Admin panel</h2>
+          <p>Manage members, rooms, and messages.</p>
+
+          <h3>Members</h3>
+          {memberList.length === 0 && <p>No members found.</p>}
+
+          {memberList.map(member => (
+            <div
+              key={member.id}
+              style={{
+                border: '1px solid #ddd',
+                padding: '12px',
+                marginBottom: '12px',
+                borderRadius: '6px',
+              }}
+            >
+              <strong>{member.display_name || member.email}</strong>
+              <div>{member.email}</div>
+
+              <div style={{ marginTop: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleMemberToggleAdmin(member.id, !member.is_admin)}
+                  style={{ marginRight: '8px' }}
+                >
+                  {member.is_admin ? 'Remove admin' : 'Make admin'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleMemberDelete(member.id)}
+                  style={{ marginRight: '8px' }}
+                >
+                  Delete member
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <h3>Rooms</h3>
+          {rooms.length === 0 && <p>No rooms available.</p>}
+          {rooms.map(room => (
+            <div key={room.id} style={{ marginBottom: '8px' }}>
+              <strong>{room.name}</strong>
+              <div>{room.description}</div>
+              <button onClick={() => handleDeleteRoom(room.id)}>
+                Delete room
+              </button>
+            </div>
+          ))}
+
+          <h3>Messages</h3>
+          {messages.length === 0 && <p>No messages loaded in the current room.</p>}
+          {messages.map(messageItem => (
+            <div key={messageItem.id} style={{ marginBottom: '8px' }}>
+              <strong>{profiles[messageItem.author_id] || 'Unknown'}</strong>
+              <div>{messageItem.body}</div>
+              <button onClick={() => handleDeleteMessage(messageItem.id)}>
+                Delete message
+              </button>
+            </div>
+          ))}
+        </div>
       )}
 
       {message && (
