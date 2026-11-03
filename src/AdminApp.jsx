@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
 
-const adminRoles = ['administrator']
-
 function AdminApp() {
   const [session, setSession] = useState(null)
   const [membership, setMembership] = useState(null)
@@ -30,8 +28,12 @@ function AdminApp() {
   useEffect(() => {
     let cancelled = false
     async function checkAdmin() {
+      if (!session) {
+        setMembership(null)
+        setLoading(false)
+        return
+      }
       setMembership(null)
-      if (!session) return
       setLoading(true)
       const { data, error } = await supabase.from('memberships')
         .select('user_id, role, status, must_change_password')
@@ -46,7 +48,7 @@ function AdminApp() {
   }, [session])
 
   useEffect(() => {
-    if (membership?.status === 'active' && adminRoles.includes(membership.role) && !membership.must_change_password) {
+    if (membership?.status === 'active' && membership.role === 'administrator' && !membership.must_change_password) {
       refreshAll()
     }
   }, [membership])
@@ -146,7 +148,7 @@ function AdminApp() {
   </main>
 
   if (loading) return <main className="login-container"><p>Checking administrator access…</p></main>
-  if (!membership || membership.status !== 'active' || !adminRoles.includes(membership.role)) return <main className="login-container">
+  if (!membership || membership.status !== 'active' || membership.role !== 'administrator') return <main className="login-container">
     <h1>Administrator access required</h1><p>This account does not have active administrator privileges.</p>
     <button onClick={handleLogout}>Sign out</button>
   </main>
@@ -163,7 +165,11 @@ function AdminApp() {
     </header>
     {errorMessage && <p role="alert">{errorMessage}</p>}
     <nav className="admin-tabs" aria-label="Admin sections">
-      {['members', 'rooms', 'messages'].map(tab => <button key={tab} aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
+      {['members', 'rooms', 'messages'].map(tab => (
+        <button key={tab} aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab)}>
+          {tab[0].toUpperCase() + tab.slice(1)}
+        </button>
+      ))}
       <button onClick={refreshAll}>Refresh</button>
     </nav>
 

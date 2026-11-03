@@ -56,6 +56,7 @@ function App() {
         setMessage(error?.message || 'This account has no community membership. Please contact the administrator.')
       } else {
         setMembership(data)
+        setMessage('')
       }
       setMembershipLoading(false)
     }
@@ -123,6 +124,7 @@ function App() {
     setSelectedRoom(null)
     setMessages([])
     setRooms([])
+    setProfiles({})
   }
 
   async function handlePasswordChange(event) {
@@ -132,6 +134,7 @@ function App() {
       setMessage('Enter your temporary password, choose a new password of at least 8 characters, and confirm it.')
       return
     }
+
     const { error: verifyError } = await supabase.auth.signInWithPassword({
       email: session.user.email,
       password: currentPassword,
@@ -140,27 +143,30 @@ function App() {
       setMessage('The current password is incorrect.')
       return
     }
+
     const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
     if (updateError) {
       setMessage(updateError.message)
       return
     }
-    const { error: flagError } = await supabase.rpc('complete_password_change')
-    if (flagError) {
-      setMessage(`Password was changed, but account activation could not be completed: ${flagError.message}. Contact the administrator.`)
+
+    // A database trigger clears must_change_password only when Auth actually
+    // changes encrypted_password. No client-callable completion RPC is used.
+    const { data, error: membershipError } = await supabase
+      .from('memberships')
+      .select('user_id, role, status, must_change_password')
+      .eq('user_id', session.user.id)
+      .single()
+    if (membershipError || data?.must_change_password) {
+      setMessage('Your password changed, but onboarding has not yet been confirmed. Please sign out and contact the administrator.')
       return
     }
-    setMembership(current => current ? { ...current, must_change_password: false } : current)
+
+    setMembership(data)
     setCurrentPassword('')
     setNewPassword('')
     setConfirmPassword('')
     setMessage('Password updated. You can now use the community.')
-  }
-
-  async function selectRoom(room) {
-    setSelectedRoom(room)
-    setMessage('')
-    await loadMessages(room.id)
   }
 
   async function handleCreateRoom(event) {
@@ -275,7 +281,7 @@ function App() {
       <h1>The Formby Commons</h1>
       <p>Signed in as {session.user.email}</p>
       <nav>
-        <a href="./admin.html" hidden={membership.role !== 'administrator'}>Admin panel</a>
+        {membership.role === 'administrator' && <a href="./admin.html">Admin panel</a>}
         <button onClick={handleLogout}>Sign out</button>
       </nav>
     </header>
@@ -291,7 +297,7 @@ function App() {
     </section>}
     <section className="room-list"><h2>Rooms</h2>
       {rooms.length === 0 && <p>No rooms available.</p>}
-      {rooms.map(room => <button key={room.id} aria-current={selectedRoom?.id === room.id} onClick={() => selectRoom(room)}>{room.name}</button>)}
+      {rooms.map(room => <button key={room.id} aria-current={selectedRoom?.id === room.id} onClick={() => { setSelectedRoom(room); loadMessages(room.id) }}>{room.name}</button>)}
     </section>
     {selectedRoom && <section className="discussion">
       <h2>{selectedRoom.name}</h2>
