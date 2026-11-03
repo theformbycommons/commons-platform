@@ -15,6 +15,10 @@ function App() {
   const [messages, setMessages] = useState([])
   const [profiles, setProfiles] = useState({})
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomDescription, setNewRoomDescription] = useState('')
 
@@ -95,6 +99,7 @@ function App() {
       setSelectedRoom(null)
       setMessages([])
       setProfiles({})
+      setSearchResults([])
     }
   }, [session, membership])
 
@@ -169,6 +174,7 @@ function App() {
     setMessages([])
     setRooms([])
     setProfiles({})
+    setSearchResults([])
     setMessage('')
   }
 
@@ -295,6 +301,60 @@ function App() {
     setReplyText('')
     setReplyingTo(null)
     await loadMessages(selectedRoom.id)
+  }
+
+  async function handleSiteSearch(e) {
+    e.preventDefault()
+    const trimmed = searchQuery.trim()
+
+    if (!trimmed) {
+      setSearchResults([])
+      return
+    }
+
+    const terms = trimmed.toLowerCase().split(/\s+/).filter(Boolean)
+    if (terms.length > 2) {
+      setMessage('Use one or two search keywords only.')
+      return
+    }
+
+    setSearchLoading(true)
+    setMessage('')
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      setMessage(error.message)
+      setSearchLoading(false)
+      return
+    }
+
+    const roomMap = new Map((rooms || []).map(room => [room.id, room]))
+    const matches = (data || []).filter(item => {
+      const body = String(item.body || '').toLowerCase()
+      return terms.every(term => body.includes(term))
+    }).slice(0, 20)
+
+    const enriched = matches.map(item => ({
+      ...item,
+      roomName: roomMap.get(item.room_id)?.name || 'Unknown room',
+      excerpt: String(item.body || '').trim(),
+    }))
+
+    setSearchResults(enriched)
+    setSearchLoading(false)
+  }
+
+  async function openSearchResult(roomId) {
+    const room = rooms.find(item => item.id === roomId)
+    if (!room) return
+
+    setSelectedRoom(room)
+    await loadMessages(roomId)
   }
 
   function sortNewestFirst(items) {
@@ -526,6 +586,57 @@ function App() {
       </div>
 
       {message && <p>{message}</p>}
+
+      <form onSubmit={handleSiteSearch} style={{ marginBottom: '20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={event => setSearchQuery(event.target.value)}
+          placeholder="Search messages (one or two keywords)"
+          aria-label="Search messages"
+          style={{ flex: '1 1 240px', minWidth: 180 }}
+        />
+        <button type="submit" disabled={searchLoading}>
+          {searchLoading ? 'Searching…' : 'Search'}
+        </button>
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchQuery('')
+              setSearchResults([])
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </form>
+
+      {searchQuery && (
+        <section style={{ marginBottom: '20px' }}>
+          <h2>Search results</h2>
+          {searchLoading && <p>Searching…</p>}
+          {!searchLoading && searchResults.length === 0 && <p>No matching messages found.</p>}
+          {!searchLoading && searchResults.length > 0 && searchResults.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => openSearchResult(item.room_id)}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                marginBottom: '8px',
+                padding: '12px',
+              }}
+            >
+              <strong>{item.roomName}</strong><br />
+              <small>{new Date(item.created_at).toLocaleString('en-GB')}</small><br />
+              <span>{item.excerpt.slice(0, 180)}{item.excerpt.length > 180 ? '…' : ''}</span>
+            </button>
+          ))}
+        </section>
+      )}
 
       {membership.role === 'administrator' && (
         <div style={{ marginBottom: '24px' }}>
