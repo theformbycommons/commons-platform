@@ -491,7 +491,7 @@ function App() {
           <label>
             Confirm new password
             <input
-              type="password'
+              type="password"
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
             />
