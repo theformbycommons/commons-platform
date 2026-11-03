@@ -45,6 +45,7 @@ label { display: block; margin: 0.75rem 0; }
 .community-app header nav { display: flex; gap: 0.75rem; align-items: center; }
 .room-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.5rem 0; }
 .room-list h2 { flex-basis: 100%; }
+.discussion { --thread-indent: 24px; }
 .discussion article { margin-top: 0.8rem; }
 .admin-tabs { display: flex; gap: 0.5rem; margin: 1rem 0 1.5rem; }
 .admin-card { background: white; border: 1px solid #d6dbe1; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
@@ -57,4 +58,5 @@ label { display: block; margin: 0.75rem 0; }
 @media (max-width: 600px) {
   #root { padding: 1rem; }
   .community-app { margin: 0 auto; }
+  .discussion { --thread-indent: 8px; }
 }

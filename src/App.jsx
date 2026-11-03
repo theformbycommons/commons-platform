@@ -325,7 +325,7 @@ function App() {
             borderRadius: '8px',
             padding: '12px',
             marginBottom: '12px',
-            marginLeft: `${Math.min(depth, 8) * 28}px`,
+            marginLeft: `calc(${Math.min(depth, 8)} * var(--thread-indent))`,
             background: depth > 0 ? '#f8f8f8' : '#fff',
           }}
         >
