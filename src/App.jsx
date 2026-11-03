@@ -23,6 +23,10 @@ function App() {
 
   const [collapsedThreads, setCollapsedThreads] = useState({})
 
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+
   useEffect(() => {
     async function loadSession() {
       const { data } = await supabase.auth.getSession()
@@ -125,6 +129,57 @@ function App() {
     setRooms([])
     setProfiles({})
     setCollapsedThreads({})
+    setCurrentPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+  }
+
+  async function handlePasswordChange(e) {
+    e.preventDefault()
+
+    if (!session) {
+      setMessage('You must be signed in to change your password.')
+      return
+    }
+
+    if (!currentPassword.trim()) {
+      setMessage('Please enter your current password.')
+      return
+    }
+
+    if (newPassword.length < 8) {
+      setMessage('Your new password must be at least 8 characters long.')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setMessage('The new passwords do not match.')
+      return
+    }
+
+    const { error: currentPasswordError } = await supabase.auth.signInWithPassword({
+      email: session.user.email,
+      password: currentPassword,
+    })
+
+    if (currentPasswordError) {
+      setMessage('Current password is incorrect.')
+      return
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: newPassword,
+    })
+
+    if (updateError) {
+      setMessage(updateError.message)
+      return
+    }
+
+    setCurrentPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setMessage('Password updated successfully.')
   }
 
   async function handlePost(e) {
@@ -176,29 +231,29 @@ function App() {
   }
 
   async function handleCreateRoom(e) {
-  e.preventDefault()
+    e.preventDefault()
 
-  if (!newRoomName.trim()) return
+    if (!newRoomName.trim()) return
 
-  const { error } = await supabase
-    .from('rooms')
-    .insert({
-      name: newRoomName,
-      description: newRoomDescription,
-      created_by: session.user.id,
-      is_general: false,
-    })
+    const { error } = await supabase
+      .from('rooms')
+      .insert({
+        name: newRoomName,
+        description: newRoomDescription,
+        created_by: session.user.id,
+        is_general: false,
+      })
 
-  if (error) {
-    setMessage(error.message)
-    return
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    setNewRoomName('')
+    setNewRoomDescription('')
+
+    await loadRooms()
   }
-
-  setNewRoomName('')
-  setNewRoomDescription('')
-
-  await loadRooms()
-}
 
   function getRootMessages() {
     return messages.filter(msg => msg.parent_id === null)
@@ -218,12 +273,12 @@ function App() {
     )
   }
 
-function toggleThread(messageId) {
-  setCollapsedThreads(prev => ({
-    ...prev,
-    [messageId]: !prev[messageId],
-  }))
-}
+  function toggleThread(messageId) {
+    setCollapsedThreads(prev => ({
+      ...prev,
+      [messageId]: !prev[messageId],
+    }))
+  }
 
   function formatDate(dateString) {
     return new Date(dateString).toLocaleString('en-GB', {
@@ -365,39 +420,70 @@ function toggleThread(messageId) {
 
       <hr />
 
+      <h2>Account</h2>
+
+      <form onSubmit={handlePasswordChange}>
+        <input
+          type="password"
+          placeholder="Current password"
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+        />
+
+        <input
+          type="password"
+          placeholder="New password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+        />
+
+        <input
+          type="password"
+          placeholder="Confirm new password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+        />
+
+        <button type="submit">
+          Change Password
+        </button>
+      </form>
+
+      <hr />
+
       <h2>Rooms</h2>
 
       <hr />
 
-<h3>Create Room</h3>
+      <h3>Create Room</h3>
 
-<form onSubmit={handleCreateRoom}>
-  <input
-    type="text"
-    placeholder="Room name"
-    value={newRoomName}
-    onChange={(e) => setNewRoomName(e.target.value)}
-  />
+      <form onSubmit={handleCreateRoom}>
+        <input
+          type="text"
+          placeholder="Room name"
+          value={newRoomName}
+          onChange={(e) => setNewRoomName(e.target.value)}
+        />
 
-  <br />
-  <br />
+        <br />
+        <br />
 
-  <textarea
-    rows="3"
-    style={{ width: '100%' }}
-    placeholder="Room description"
-    value={newRoomDescription}
-    onChange={(e) => setNewRoomDescription(e.target.value)}
-  />
+        <textarea
+          rows="3"
+          style={{ width: '100%' }}
+          placeholder="Room description"
+          value={newRoomDescription}
+          onChange={(e) => setNewRoomDescription(e.target.value)}
+        />
 
-  <br />
+        <br />
 
-  <button type="submit">
-    Create Room
-  </button>
-</form>
+        <button type="submit">
+          Create Room
+        </button>
+      </form>
 
-<hr />
+      <hr />
 
       {rooms.map((room) => (
         <button
