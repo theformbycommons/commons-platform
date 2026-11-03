@@ -3,21 +3,22 @@ import { supabase } from './lib/supabase'
 
 function App() {
   const [session, setSession] = useState(null)
+  const [membership, setMembership] = useState(null)
+  const [loadingMembership, setLoadingMembership] = useState(true)
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
 
   const [rooms, setRooms] = useState([])
   const [selectedRoom, setSelectedRoom] = useState(null)
+  const [messages, setMessages] = useState([])
+  const [profiles, setProfiles] = useState({})
 
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomDescription, setNewRoomDescription] = useState('')
 
-  const [messages, setMessages] = useState([])
-  const [profiles, setProfiles] = useState({})
-
   const [newMessage, setNewMessage] = useState('')
-
   const [replyingTo, setReplyingTo] = useState(null)
   const [replyText, setReplyText] = useState('')
 
@@ -28,32 +29,79 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState('')
 
   useEffect(() => {
-    async function loadSession() {
+    let mounted = true
+
+    async function loadInitialSession() {
       const { data } = await supabase.auth.getSession()
-      setSession(data.session)
+      if (mounted) setSession(data.session)
     }
 
-    loadSession()
+    loadInitialSession()
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
-  useEffect(() => {
-    if (session) {
-      loadRooms()
+  async function refreshMembership() {
+    if (!session?.user?.id) {
+      setMembership(null)
+      return
     }
+
+    const { data, error } = await supabase
+      .from('memberships')
+      .select('user_id, role, status, must_change_password')
+      .eq('user_id', session.user.id)
+      .single()
+
+    if (error) {
+      setMembership(null)
+      return
+    }
+
+    setMembership(data)
+  }
+
+  useEffect(() => {
+    if (!session) {
+      setMembership(null)
+      setLoadingMembership(false)
+      return
+    }
+
+    setLoadingMembership(true)
+    refreshMembership().finally(() => setLoadingMembership(false))
   }, [session])
+
+  useEffect(() => {
+    if (
+      session &&
+      membership &&
+      membership.status === 'active' &&
+      membership.must_change_password === false
+    ) {
+      loadRooms()
+    } else {
+      setRooms([])
+      setSelectedRoom(null)
+      setMessages([])
+      setProfiles({})
+    }
+  }, [session, membership])
 
   async function loadRooms() {
     const { data, error } = await supabase
       .from('rooms')
       .select('*')
+      .is('archived_at', null)
       .order('name')
 
     if (error) {
@@ -79,37 +127,27 @@ function App() {
 
     setMessages(data || [])
 
-    const authorIds = [
-      ...new Set(
-        (data || [])
-          .map(msg => msg.author_id)
-          .filter(Boolean)
-      ),
-    ]
-
-    if (authorIds.length > 0) {
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('id, display_name')
-        .in('id', authorIds)
-
-      const profileMap = {}
-
-      ;(profileData || []).forEach(profile => {
-        profileMap[profile.id] = profile.display_name
-      })
-
-      setProfiles(profileMap)
+    const ids = [...new Set((data || []).map(item => item.author_id).filter(Boolean))]
+    if (!ids.length) {
+      setProfiles({})
+      return
     }
-  }
 
-  async function selectRoom(room) {
-    setSelectedRoom(room)
-    await loadMessages(room.id)
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('id, display_name')
+      .in('id', ids)
+
+    const map = {}
+    ;(profileData || []).forEach(item => {
+      map[item.id] = item.display_name
+    })
+    setProfiles(map)
   }
 
   async function handleLogin(e) {
     e.preventDefault()
+    setMessage('')
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -118,27 +156,27 @@ function App() {
 
     if (error) {
       setMessage(error.message)
+      return
     }
   }
 
   async function handleLogout() {
     await supabase.auth.signOut()
-
+    setSession(null)
+    setMembership(null)
     setSelectedRoom(null)
     setMessages([])
     setRooms([])
     setProfiles({})
-    setCollapsedThreads({})
-    setCurrentPassword('')
-    setNewPassword('')
-    setConfirmPassword('')
+    setMessage('')
   }
 
   async function handlePasswordChange(e) {
     e.preventDefault()
+    setMessage('')
 
     if (!session) {
-      setMessage('You must be signed in to change your password.')
+      setMessage('You must be signed in.')
       return
     }
 
@@ -157,16 +195,18 @@ function App() {
       return
     }
 
-    const { error: currentPasswordError } = await supabase.auth.signInWithPassword({
+    // Verify current password before changing it
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
       email: session.user.email,
       password: currentPassword,
     })
 
-    if (currentPasswordError) {
+    if (verifyError) {
       setMessage('Current password is incorrect.')
       return
     }
 
+    // Actual secure change
     const { error: updateError } = await supabase.auth.updateUser({
       password: newPassword,
     })
@@ -176,24 +216,54 @@ function App() {
       return
     }
 
+    // The DB trigger clears must_change_password when encrypted_password changes.
+    // Do NOT call a custom RPC here.
+    // Reload membership after a brief moment to allow the trigger to finish.
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    await refreshMembership()
+
+    if (membership?.must_change_password === true) {
+      setMessage('Password changed. Please sign in again to continue.')
+      return
+    }
+
     setCurrentPassword('')
     setNewPassword('')
     setConfirmPassword('')
     setMessage('Password updated successfully.')
   }
 
+  async function handleCreateRoom(e) {
+    e.preventDefault()
+    if (!newRoomName.trim()) return
+
+    const { error } = await supabase.from('rooms').insert({
+      name: newRoomName.trim(),
+      description: newRoomDescription.trim(),
+      created_by: session.user.id,
+      is_general: false,
+    })
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    setNewRoomName('')
+    setNewRoomDescription('')
+    await loadRooms()
+  }
+
   async function handlePost(e) {
     e.preventDefault()
+    if (!newMessage.trim() || !selectedRoom) return
 
-    if (!newMessage.trim()) return
-
-    const { error } = await supabase
-      .from('messages')
-      .insert({
-        room_id: selectedRoom.id,
-        author_id: session.user.id,
-        body: newMessage,
-      })
+    const { error } = await supabase.from('messages').insert({
+      room_id: selectedRoom.id,
+      author_id: session.user.id,
+      body: newMessage.trim(),
+    })
 
     if (error) {
       setMessage(error.message)
@@ -206,18 +276,15 @@ function App() {
 
   async function handleReply(e) {
     e.preventDefault()
+    if (!replyText.trim() || !replyingTo || !selectedRoom) return
 
-    if (!replyText.trim()) return
-
-    const { error } = await supabase
-      .from('messages')
-      .insert({
-        room_id: selectedRoom.id,
-        author_id: session.user.id,
-        body: replyText,
-        parent_id: replyingTo.id,
-        root_id: replyingTo.root_id || replyingTo.id,
-      })
+    const { error } = await supabase.from('messages').insert({
+      room_id: selectedRoom.id,
+      author_id: session.user.id,
+      body: replyText.trim(),
+      parent_id: replyingTo.id,
+      root_id: replyingTo.root_id || replyingTo.id,
+    })
 
     if (error) {
       setMessage(error.message)
@@ -226,276 +293,244 @@ function App() {
 
     setReplyText('')
     setReplyingTo(null)
-
     await loadMessages(selectedRoom.id)
   }
 
-  async function handleCreateRoom(e) {
-    e.preventDefault()
-
-    if (!newRoomName.trim()) return
-
-    const { error } = await supabase
-      .from('rooms')
-      .insert({
-        name: newRoomName,
-        description: newRoomDescription,
-        created_by: session.user.id,
-        is_general: false,
-      })
-
-    if (error) {
-      setMessage(error.message)
-      return
-    }
-
-    setNewRoomName('')
-    setNewRoomDescription('')
-
-    await loadRooms()
-  }
-
   function getRootMessages() {
-    return messages.filter(msg => msg.parent_id === null)
+    return messages.filter(item => item.parent_id === null)
   }
 
   function getReplies(parentId) {
-    return messages.filter(msg => msg.parent_id === parentId)
+    return messages.filter(item => item.parent_id === parentId)
   }
 
-  function countReplies(messageId) {
-    const directReplies = getReplies(messageId)
-
-    return directReplies.reduce(
-      (total, reply) =>
-        total + 1 + countReplies(reply.id),
-      0
-    )
+  function countReplies(id) {
+    return getReplies(id).reduce((total, reply) => total + 1 + countReplies(reply.id), 0)
   }
 
-  function toggleThread(messageId) {
-    setCollapsedThreads(prev => ({
-      ...prev,
-      [messageId]: !prev[messageId],
-    }))
-  }
-
-  function formatDate(dateString) {
-    return new Date(dateString).toLocaleString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
-
-  function renderMessageTree(msg, depth = 0) {
-    const replies = getReplies(msg.id)
-    const isCollapsed = collapsedThreads[msg.id]
-    const replyCount = countReplies(msg.id)
+  function renderMessageTree(item, depth = 0) {
+    const replies = getReplies(item.id)
+    const count = countReplies(item.id)
+    const collapsed = collapsedThreads[item.id]
 
     return (
-      <div key={msg.id}>
+      <div key={item.id}>
         <div
           style={{
             border: '1px solid #ddd',
-            padding: '10px',
-            marginBottom: '10px',
-            borderRadius: '6px',
-            marginLeft: `${depth * 40}px`,
-            background: depth > 0 ? '#f8f8f8' : '#ffffff',
+            borderRadius: '8px',
+            padding: '12px',
+            marginBottom: '12px',
+            marginLeft: `${Math.min(depth, 8) * 28}px`,
+            background: depth > 0 ? '#f8f8f8' : '#fff',
           }}
         >
-          <strong>
-            {profiles[msg.author_id] || 'Unknown Member'}
-          </strong>
+          <strong>{profiles[item.author_id] || 'Community member'}</strong><br />
+          <small>{new Date(item.created_at).toLocaleString('en-GB')}</small>
+          <p>{item.body}</p>
 
-          <br />
-
-          <small>
-            {formatDate(msg.created_at)}
-          </small>
-
-          <p>{msg.body}</p>
-
-          {replyCount > 0 && (
+          {count > 0 && (
             <button
-              onClick={() => toggleThread(msg.id)}
+              type="button"
+              onClick={() =>
+                setCollapsedThreads(prev => ({
+                  ...prev,
+                  [item.id]: !prev[item.id],
+                }))
+              }
               style={{ marginRight: '8px' }}
             >
-              {isCollapsed
-                ? `Expand (${replyCount})`
-                : `Collapse (${replyCount})`}
+              {collapsed ? `Expand (${count})` : `Collapse (${count})`}
             </button>
           )}
 
-          <button
-            onClick={() => setReplyingTo(msg)}
-          >
+          <button type="button" onClick={() => setReplyingTo(item)}>
             Reply
           </button>
 
-          {replyingTo?.id === msg.id && (
-            <form onSubmit={handleReply}>
-              <br />
-
+          {replyingTo?.id === item.id && (
+            <form onSubmit={handleReply} style={{ marginTop: '10px' }}>
               <textarea
                 rows="3"
-                style={{ width: '100%' }}
                 value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
+                onChange={e => setReplyText(e.target.value)}
+                style={{ width: '100%' }}
                 placeholder="Write a reply..."
               />
-
-              <br />
-
-              <button type="submit">
-                Post Reply
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setReplyingTo(null)
-                  setReplyText('')
-                }}
-                style={{ marginLeft: '8px' }}
-              >
-                Cancel
-              </button>
+              <div style={{ marginTop: '8px' }}>
+                <button type="submit">Post reply</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReplyingTo(null)
+                    setReplyText('')
+                  }}
+                  style={{ marginLeft: '8px' }}
+                >
+                  Cancel
+                </button>
+              </div>
             </form>
           )}
         </div>
 
-        {!isCollapsed &&
-          replies.map(reply =>
-            renderMessageTree(reply, depth + 1)
-          )}
+        {!collapsed && replies.map(reply => renderMessageTree(reply, depth + 1))}
       </div>
     )
   }
 
   if (!session) {
     return (
-      <div style={{ maxWidth: '400px', margin: '50px auto' }}>
+      <div style={{ maxWidth: '420px', margin: '50px auto' }}>
         <h1>The Formby Commons</h1>
 
         <form onSubmit={handleLogin}>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
+          <label>
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+            />
+          </label>
 
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+            />
+          </label>
 
-          <button type="submit">
-            Sign In
-          </button>
+          <button type="submit">Sign in</button>
         </form>
 
-        <p>{message}</p>
+        {message && <p>{message}</p>}
+      </div>
+    )
+  }
+
+  if (loadingMembership) {
+    return <p>Checking membership…</p>
+  }
+
+  if (!membership || membership.status !== 'active') {
+    return (
+      <div style={{ maxWidth: '420px', margin: '50px auto' }}>
+        <h1>Membership unavailable</h1>
+        <p>Your account does not currently have active community access.</p>
+        <button onClick={handleLogout}>Sign out</button>
+      </div>
+    )
+  }
+
+  if (membership.must_change_password) {
+    return (
+      <div style={{ maxWidth: '500px', margin: '50px auto' }}>
+        <h1>Set your private password</h1>
+        <p>Please replace your temporary password before continuing.</p>
+
+        <form onSubmit={handlePasswordChange}>
+          <label>
+            Current password
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+            />
+          </label>
+
+          <label>
+            New password
+            <input
+              type="password"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+            />
+          </label>
+
+          <label>
+            Confirm new password
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+            />
+          </label>
+
+          <button type="submit">Change password and continue</button>
+        </form>
+
+        {message && <p>{message}</p>}
+        <button type="button" onClick={handleLogout} style={{ marginTop: '8px' }}>
+          Sign out
+        </button>
       </div>
     )
   }
 
   return (
-    <div style={{ maxWidth: '900px', margin: '50px auto' }}>
+    <div style={{ maxWidth: '1000px', margin: '40px auto', padding: '0 16px' }}>
       <h1>The Formby Commons</h1>
+      <p>Signed in as: {session.user.email}</p>
 
-      <p>
-        Logged in as: {session.user.email}
-      </p>
-
-      <button onClick={handleLogout}>
-        Sign Out
-      </button>
-
-      <hr />
-
-      <h2>Account</h2>
-
-      <form onSubmit={handlePasswordChange}>
-        <input
-          type="password"
-          placeholder="Current password"
-          value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
-        />
-
-        <input
-          type="password"
-          placeholder="New password"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-        />
-
-        <input
-          type="password"
-          placeholder="Confirm new password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-        />
-
-        <button type="submit">
-          Change Password
+      <div style={{ marginBottom: '20px' }}>
+        <button type="button" onClick={handleLogout} style={{ marginRight: '8px' }}>
+          Sign out
         </button>
-      </form>
 
-      <hr />
+        {membership.role === 'administrator' && (
+          <a href="./admin.html">
+            <button type="button">Admin panel</button>
+          </a>
+        )}
+      </div>
+
+      {message && <p>{message}</p>}
+
+      {membership.role === 'administrator' && (
+        <div style={{ marginBottom: '24px' }}>
+          <h2>Create room</h2>
+          <form onSubmit={handleCreateRoom}>
+            <label>
+              Room name
+              <input
+                type="text"
+                value={newRoomName}
+                onChange={e => setNewRoomName(e.target.value)}
+              />
+            </label>
+
+            <label>
+              Description
+              <textarea
+                rows="3"
+                value={newRoomDescription}
+                onChange={e => setNewRoomDescription(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </label>
+
+            <button type="submit">Create room</button>
+          </form>
+        </div>
+      )}
 
       <h2>Rooms</h2>
 
-      <hr />
-
-      <h3>Create Room</h3>
-
-      <form onSubmit={handleCreateRoom}>
-        <input
-          type="text"
-          placeholder="Room name"
-          value={newRoomName}
-          onChange={(e) => setNewRoomName(e.target.value)}
-        />
-
-        <br />
-        <br />
-
-        <textarea
-          rows="3"
-          style={{ width: '100%' }}
-          placeholder="Room description"
-          value={newRoomDescription}
-          onChange={(e) => setNewRoomDescription(e.target.value)}
-        />
-
-        <br />
-
-        <button type="submit">
-          Create Room
-        </button>
-      </form>
-
-      <hr />
-
-      {rooms.map((room) => (
+      {rooms.map(room => (
         <button
           key={room.id}
-          onClick={() => selectRoom(room)}
+          type="button"
+          onClick={() => {
+            setSelectedRoom(room)
+            loadMessages(room.id)
+          }}
           style={{
             display: 'block',
             marginBottom: '10px',
-            fontWeight:
-              selectedRoom?.id === room.id
-                ? 'bold'
-                : 'normal',
+            fontWeight: selectedRoom?.id === room.id ? 'bold' : 'normal',
           }}
         >
           {room.name}
@@ -503,39 +538,27 @@ function App() {
       ))}
 
       {selectedRoom && (
-        <>
-          <hr />
-
+        <div style={{ marginTop: '30px' }}>
           <h2>{selectedRoom.name}</h2>
+
+          {selectedRoom.description && <p>{selectedRoom.description}</p>}
 
           <form onSubmit={handlePost}>
             <textarea
               rows="4"
-              style={{ width: '100%' }}
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
+              onChange={e => setNewMessage(e.target.value)}
+              style={{ width: '100%' }}
               placeholder="Write a message..."
             />
-
-            <button type="submit">
-              Post Message
-            </button>
+            <button type="submit">Post message</button>
           </form>
 
           <hr />
 
-          {messages.length === 0 && (
-            <p>No messages yet.</p>
-          )}
-
-          {getRootMessages().map(msg =>
-            renderMessageTree(msg)
-          )}
-        </>
-      )}
-
-      {message && (
-        <p>{message}</p>
+          {messages.length === 0 && <p>No messages yet.</p>}
+          {getRootMessages().map(msg => renderMessageTree(msg))}
+        </div>
       )}
     </div>
   )
