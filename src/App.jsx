@@ -23,6 +23,7 @@ function App() {
   const [replyText, setReplyText] = useState('')
 
   const [collapsedThreads, setCollapsedThreads] = useState({})
+  const [expandedMessages, setExpandedMessages] = useState({})
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -312,10 +313,21 @@ function App() {
     return getReplies(id).reduce((total, reply) => total + 1 + countReplies(reply.id), 0)
   }
 
+  function toggleMessageExpansion(id) {
+    setExpandedMessages(prev => ({
+      ...prev,
+      [id]: !(prev[id] ?? true),
+    }))
+  }
+
   function renderMessageTree(item, depth = 0) {
     const replies = getReplies(item.id)
     const count = countReplies(item.id)
     const collapsed = collapsedThreads[item.id]
+    const messageText = String(item.body || '').trim()
+    const isLongMessage = messageText.length > 220
+    const isExpanded = expandedMessages[item.id] ?? !isLongMessage
+    const indentPx = depth === 0 ? 0 : Math.min(depth, 3) * 10
 
     return (
       <div key={item.id}>
@@ -325,13 +337,36 @@ function App() {
             borderRadius: '8px',
             padding: '12px',
             marginBottom: '12px',
-            marginLeft: `calc(${Math.min(depth, 8)} * var(--thread-indent))`,
+            marginLeft: `${indentPx}px`,
             background: depth > 0 ? '#f8f8f8' : '#fff',
+            maxWidth: '100%',
+            overflowWrap: 'anywhere',
           }}
         >
           <strong>{profiles[item.author_id] || 'Community member'}</strong><br />
           <small>{new Date(item.created_at).toLocaleString('en-GB')}</small>
-          <p>{item.body}</p>
+
+          <div
+            onClick={() => isLongMessage && toggleMessageExpansion(item.id)}
+            style={{
+              marginTop: '8px',
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere',
+              cursor: isLongMessage ? 'pointer' : 'default',
+            }}
+          >
+            {isLongMessage && !isExpanded ? `${messageText.slice(0, 220)}…` : messageText}
+          </div>
+
+          {isLongMessage && (
+            <button
+              type="button"
+              onClick={() => toggleMessageExpansion(item.id)}
+              style={{ marginTop: '8px', marginLeft: 0 }}
+            >
+              {isExpanded ? 'Show less' : 'Read more'}
+            </button>
+          )}
 
           {count > 0 && (
             <button
