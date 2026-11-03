@@ -15,6 +15,10 @@ function App() {
   const [messages, setMessages] = useState([])
   const [profiles, setProfiles] = useState({})
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomDescription, setNewRoomDescription] = useState('')
 
@@ -95,6 +99,7 @@ function App() {
       setSelectedRoom(null)
       setMessages([])
       setProfiles({})
+      setSearchResults([])
     }
   }, [session, membership])
 
@@ -169,6 +174,7 @@ function App() {
     setMessages([])
     setRooms([])
     setProfiles({})
+    setSearchResults([])
     setMessage('')
   }
 
@@ -196,7 +202,6 @@ function App() {
       return
     }
 
-    // Verify current password before changing it
     const { error: verifyError } = await supabase.auth.signInWithPassword({
       email: session.user.email,
       password: currentPassword,
@@ -207,7 +212,6 @@ function App() {
       return
     }
 
-    // Actual secure change
     const { error: updateError } = await supabase.auth.updateUser({
       password: newPassword,
     })
@@ -217,11 +221,7 @@ function App() {
       return
     }
 
-    // The DB trigger clears must_change_password when encrypted_password changes.
-    // Do NOT call a custom RPC here.
-    // Reload membership after a brief moment to allow the trigger to finish.
     await new Promise(resolve => setTimeout(resolve, 500))
-
     await refreshMembership()
 
     if (membership?.must_change_password === true) {
@@ -297,6 +297,60 @@ function App() {
     await loadMessages(selectedRoom.id)
   }
 
+  async function handleSiteSearch(e) {
+    e.preventDefault()
+    const trimmed = searchQuery.trim()
+
+    if (!trimmed) {
+      setSearchResults([])
+      return
+    }
+
+    const terms = trimmed.toLowerCase().split(/\s+/).filter(Boolean)
+    if (terms.length > 2) {
+      setMessage('Use one or two search keywords only.')
+      return
+    }
+
+    setSearchLoading(true)
+    setMessage('')
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      setMessage(error.message)
+      setSearchLoading(false)
+      return
+    }
+
+    const roomMap = new Map((rooms || []).map(room => [room.id, room]))
+    const matches = (data || []).filter(item => {
+      const body = String(item.body || '').toLowerCase()
+      return terms.every(term => body.includes(term))
+    }).slice(0, 20)
+
+    const enriched = matches.map(item => ({
+      ...item,
+      roomName: roomMap.get(item.room_id)?.name || 'Unknown room',
+      excerpt: String(item.body || '').trim(),
+    }))
+
+    setSearchResults(enriched)
+    setSearchLoading(false)
+  }
+
+  async function openSearchResult(roomId) {
+    const room = rooms.find(item => item.id === roomId)
+    if (!room) return
+
+    setSelectedRoom(room)
+    await loadMessages(roomId)
+  }
+
   function sortNewestFirst(items) {
     return [...items].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   }
@@ -328,22 +382,42 @@ function App() {
     const isLongMessage = messageText.length > 220
     const isExpanded = expandedMessages[item.id] ?? !isLongMessage
     const indentPx = depth === 0 ? 0 : Math.min(depth, 3) * 10
+    const isThreadStarter = depth === 0
 
     return (
       <div key={item.id}>
         <div
           style={{
-            border: '1px solid #ddd',
+            border: '1px solid #d8dee6',
+            borderLeft: isThreadStarter ? '4px solid #176b53' : '3px solid #cfe4dc',
             borderRadius: '8px',
             padding: '12px',
             marginBottom: '12px',
             marginLeft: `${indentPx}px`,
-            background: depth > 0 ? '#f8f8f8' : '#fff',
+            background: isThreadStarter ? '#ffffff' : '#f5faf7',
             maxWidth: '100%',
             overflowWrap: 'anywhere',
+            boxShadow: isThreadStarter ? 'inset 0 0 0 1px rgba(23,107,83,0.04)' : 'none',
           }}
         >
-          <strong>{profiles[item.author_id] || 'Community member'}</strong><br />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+            <strong>{profiles[item.author_id] || 'Community member'}</strong>
+            {isThreadStarter && (
+              <span style={{
+                fontSize: '11px',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: '#176b53',
+                background: '#e8f3ee',
+                borderRadius: '999px',
+                padding: '3px 8px',
+                fontWeight: 700,
+              }}>
+                Thread starter
+              </span>
+            )}
+          </div>
+
           <small>{new Date(item.created_at).toLocaleString('en-GB')}</small>
 
           <div
@@ -526,6 +600,57 @@ function App() {
       </div>
 
       {message && <p>{message}</p>}
+
+      <form onSubmit={handleSiteSearch} style={{ marginBottom: '20px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={event => setSearchQuery(event.target.value)}
+          placeholder="Search messages (one or two keywords)"
+          aria-label="Search messages"
+          style={{ flex: '1 1 240px', minWidth: 180 }}
+        />
+        <button type="submit" disabled={searchLoading}>
+          {searchLoading ? 'Searching…' : 'Search'}
+        </button>
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchQuery('')
+              setSearchResults([])
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </form>
+
+      {searchQuery && (
+        <section style={{ marginBottom: '20px' }}>
+          <h2>Search results</h2>
+          {searchLoading && <p>Searching…</p>}
+          {!searchLoading && searchResults.length === 0 && <p>No matching messages found.</p>}
+          {!searchLoading && searchResults.length > 0 && searchResults.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => openSearchResult(item.room_id)}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                marginBottom: '8px',
+                padding: '12px',
+              }}
+            >
+              <strong>{item.roomName}</strong><br />
+              <small>{new Date(item.created_at).toLocaleString('en-GB')}</small><br />
+              <span>{item.excerpt.slice(0, 180)}{item.excerpt.length > 180 ? '…' : ''}</span>
+            </button>
+          ))}
+        </section>
+      )}
 
       {membership.role === 'administrator' && (
         <div style={{ marginBottom: '24px' }}>
