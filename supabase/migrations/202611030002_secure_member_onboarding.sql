@@ -1,11 +1,13 @@
+-- Secure onboarding and admin policies for the existing schema.
+-- This is a follow-up to 202611030001_member_admin_onboarding.sql and is safe
+-- to run after that earlier migration has been applied.
+
 ALTER TABLE public.memberships
   ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
 
 ALTER TABLE public.rooms
   ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 
--- This is the trust boundary: a member is "ready" only if they are active
--- and have already changed their temporary password.
 CREATE OR REPLACE FUNCTION public.is_ready_member()
 RETURNS boolean
 LANGUAGE sql
@@ -25,8 +27,9 @@ $function$;
 REVOKE ALL ON FUNCTION public.is_ready_member() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_ready_member() TO authenticated;
 
--- This is the actual secure trigger: clear onboarding only when the Auth user
--- password hash really changes. The browser app cannot trigger this directly.
+-- A password change made through Supabase Auth changes encrypted_password.
+-- Clear onboarding automatically for that exact Auth user; clients cannot call
+-- a completion RPC to clear the flag without changing the Auth password.
 CREATE OR REPLACE FUNCTION public.clear_password_onboarding_after_auth_change()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -44,6 +47,7 @@ BEGIN
 END;
 $function$;
 
+REVOKE ALL ON FUNCTION public.clear_password_onboarding_after_auth_change() FROM PUBLIC;
 DROP TRIGGER IF EXISTS clear_password_onboarding_after_auth_change ON auth.users;
 CREATE TRIGGER clear_password_onboarding_after_auth_change
   AFTER UPDATE OF encrypted_password ON auth.users
@@ -51,18 +55,17 @@ CREATE TRIGGER clear_password_onboarding_after_auth_change
   WHEN (OLD.encrypted_password IS DISTINCT FROM NEW.encrypted_password)
   EXECUTE FUNCTION public.clear_password_onboarding_after_auth_change();
 
--- Remove insecure previous RPC if it exists
+-- Remove the insecure completion RPC created by the earlier migration.
 DROP FUNCTION IF EXISTS public.complete_password_change();
 
--- Read own membership
+-- Replace the broad membership list policy. Pending members can read only their
+-- own row (needed by the app's onboarding screen); ready admins can list all.
 DROP POLICY IF EXISTS "Active members can see memberships" ON public.memberships;
 DROP POLICY IF EXISTS "Users can read own membership" ON public.memberships;
+DROP POLICY IF EXISTS "Ready administrators can read memberships" ON public.memberships;
 CREATE POLICY "Users can read own membership"
   ON public.memberships FOR SELECT TO authenticated
   USING (user_id = (SELECT auth.uid()));
-
--- Admins can list all memberships only after they are active and ready
-DROP POLICY IF EXISTS "Ready administrators can read memberships" ON public.memberships;
 CREATE POLICY "Ready administrators can read memberships"
   ON public.memberships FOR SELECT TO authenticated
   USING (
@@ -70,7 +73,7 @@ CREATE POLICY "Ready administrators can read memberships"
     AND public.has_community_role(ARRAY['administrator']::text[])
   );
 
--- Admin membership updates
+-- Only ready administrators can change roles, status, or onboarding flags.
 DROP POLICY IF EXISTS "Administrators can update memberships" ON public.memberships;
 CREATE POLICY "Administrators can update memberships"
   ON public.memberships FOR UPDATE TO authenticated
@@ -82,17 +85,18 @@ CREATE POLICY "Administrators can update memberships"
     public.is_ready_member()
     AND public.has_community_role(ARRAY['administrator']::text[])
   );
-
 REVOKE UPDATE ON public.memberships FROM authenticated;
+REVOKE UPDATE (role, status, must_change_password) ON public.memberships FROM authenticated;
 GRANT UPDATE (role, status, must_change_password) ON public.memberships TO authenticated;
 
--- Profiles
+-- Profiles are member directory data. Onboarding users cannot read the directory.
 DROP POLICY IF EXISTS "Active members can read profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Ready members can read profiles" ON public.profiles;
 CREATE POLICY "Ready members can read profiles"
   ON public.profiles FOR SELECT TO authenticated
   USING (public.is_ready_member());
 
-DROP POLICY IF EXISTS "Members can update their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Administrators can update any profile" ON public.profiles;
 DROP POLICY IF EXISTS "Administrators can update profiles" ON public.profiles;
 CREATE POLICY "Administrators can update profiles"
   ON public.profiles FOR UPDATE TO authenticated
@@ -105,9 +109,11 @@ CREATE POLICY "Administrators can update profiles"
     AND public.has_community_role(ARRAY['administrator']::text[])
   );
 
--- Rooms
+-- Rooms are visible to ready members only when active. Administrators can see
+-- archived rooms too, so they can restore them from the admin panel.
 DROP POLICY IF EXISTS "Active members can read all rooms" ON public.rooms;
 DROP POLICY IF EXISTS "Ready members can read active rooms" ON public.rooms;
+DROP POLICY IF EXISTS "Ready members can read rooms" ON public.rooms;
 CREATE POLICY "Ready members can read rooms"
   ON public.rooms FOR SELECT TO authenticated
   USING (
@@ -127,6 +133,7 @@ CREATE POLICY "Administrators can create rooms"
   );
 
 DROP POLICY IF EXISTS "Administrators can update rooms" ON public.rooms;
+DROP POLICY IF EXISTS "Administrators can archive rooms" ON public.rooms;
 CREATE POLICY "Administrators can update rooms"
   ON public.rooms FOR UPDATE TO authenticated
   USING (
@@ -146,7 +153,8 @@ CREATE POLICY "Administrators can delete rooms"
     AND public.has_community_role(ARRAY['administrator']::text[])
   );
 
--- Messages
+-- Remove all known earlier message policies before recreating them: permissive
+-- policies are OR-ed, so an old policy could otherwise bypass onboarding.
 DROP POLICY IF EXISTS "Active members can read all messages" ON public.messages;
 DROP POLICY IF EXISTS "Ready members can read messages" ON public.messages;
 CREATE POLICY "Ready members can read messages"
@@ -169,6 +177,7 @@ CREATE POLICY "Ready members can read messages"
 
 DROP POLICY IF EXISTS "Active members can post messages" ON public.messages;
 DROP POLICY IF EXISTS "Members can insert messages only when ready" ON public.messages;
+DROP POLICY IF EXISTS "Ready members can post messages" ON public.messages;
 CREATE POLICY "Ready members can post messages"
   ON public.messages FOR INSERT TO authenticated
   WITH CHECK (
@@ -183,6 +192,7 @@ CREATE POLICY "Ready members can post messages"
   );
 
 DROP POLICY IF EXISTS "Authors can edit their own messages" ON public.messages;
+DROP POLICY IF EXISTS "Authors can edit their own message only while active" ON public.messages;
 DROP POLICY IF EXISTS "Authors can edit their own message only while ready" ON public.messages;
 CREATE POLICY "Authors can edit their own message only while ready"
   ON public.messages FOR UPDATE TO authenticated
