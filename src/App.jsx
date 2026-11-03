@@ -202,7 +202,6 @@ function App() {
       return
     }
 
-    // Verify current password before changing it
     const { error: verifyError } = await supabase.auth.signInWithPassword({
       email: session.user.email,
       password: currentPassword,
@@ -213,7 +212,6 @@ function App() {
       return
     }
 
-    // Actual secure change
     const { error: updateError } = await supabase.auth.updateUser({
       password: newPassword,
     })
@@ -223,11 +221,7 @@ function App() {
       return
     }
 
-    // The DB trigger clears must_change_password when encrypted_password changes.
-    // Do NOT call a custom RPC here.
-    // Reload membership after a brief moment to allow the trigger to finish.
     await new Promise(resolve => setTimeout(resolve, 500))
-
     await refreshMembership()
 
     if (membership?.must_change_password === true) {
@@ -388,22 +382,42 @@ function App() {
     const isLongMessage = messageText.length > 220
     const isExpanded = expandedMessages[item.id] ?? !isLongMessage
     const indentPx = depth === 0 ? 0 : Math.min(depth, 3) * 10
+    const isThreadStarter = depth === 0
 
     return (
       <div key={item.id}>
         <div
           style={{
-            border: '1px solid #ddd',
+            border: '1px solid #d8dee6',
+            borderLeft: isThreadStarter ? '4px solid #176b53' : '3px solid #cfe4dc',
             borderRadius: '8px',
             padding: '12px',
             marginBottom: '12px',
             marginLeft: `${indentPx}px`,
-            background: depth > 0 ? '#f8f8f8' : '#fff',
+            background: isThreadStarter ? '#ffffff' : '#f5faf7',
             maxWidth: '100%',
             overflowWrap: 'anywhere',
+            boxShadow: isThreadStarter ? 'inset 0 0 0 1px rgba(23,107,83,0.04)' : 'none',
           }}
         >
-          <strong>{profiles[item.author_id] || 'Community member'}</strong><br />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+            <strong>{profiles[item.author_id] || 'Community member'}</strong>
+            {isThreadStarter && (
+              <span style={{
+                fontSize: '11px',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: '#176b53',
+                background: '#e8f3ee',
+                borderRadius: '999px',
+                padding: '3px 8px',
+                fontWeight: 700,
+              }}>
+                Thread starter
+              </span>
+            )}
+          </div>
+
           <small>{new Date(item.created_at).toLocaleString('en-GB')}</small>
 
           <div
