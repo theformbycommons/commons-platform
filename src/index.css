@@ -14,25 +14,47 @@ body {
 }
 
 #root {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  min-height: 100vh;
   padding: 2rem;
 }
 
-h1 {
-  margin: 0 0 1.5rem;
-  text-align: center;
-  font-size: 2.5rem;
-  line-height: 1.2;
-}
-
-input {
+h1 { margin-top: 0; }
+input, textarea, select {
+  display: block;
   width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
+  padding: 0.7rem;
+  margin: 0.35rem 0 1rem;
+  font: inherit;
 }
+textarea { min-height: 5rem; }
+button, a { font: inherit; }
+button { padding: 0.6rem 0.9rem; margin: 0.25rem; cursor: pointer; }
+a { color: #176b53; }
+label { display: block; margin: 0.75rem 0; }
 
-button {
-  padding: 0.75rem 1rem;
+.login-container, .community-app {
+  width: min(100%, 980px);
+  margin: 1.5rem auto;
+}
+.login-container { max-width: 440px; }
+.community-app > header {
+  border-bottom: 1px solid #d6dbe1;
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+}
+.community-app header nav { display: flex; gap: 0.75rem; align-items: center; }
+.room-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.5rem 0; }
+.room-list h2 { flex-basis: 100%; }
+.discussion article { margin-top: 0.8rem; }
+.admin-tabs { display: flex; gap: 0.5rem; margin: 1rem 0 1.5rem; }
+.admin-card { background: white; border: 1px solid #d6dbe1; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+.admin-card h3 { margin-top: 0; }
+.admin-card code { overflow-wrap: anywhere; }
+.checkbox-label { display: flex; align-items: center; gap: 0.6rem; }
+.checkbox-label input { width: auto; margin: 0; }
+[role="alert"] { color: #a32121; }
+
+@media (max-width: 600px) {
+  #root { padding: 1rem; }
+  .community-app { margin: 0 auto; }
 }
