@@ -316,7 +316,7 @@ function App() {
   function toggleMessageExpansion(id) {
     setExpandedMessages(prev => ({
       ...prev,
-      [id]: !(prev[id] ?? true),
+      [id]: !prev[id],
     }))
   }
 
@@ -347,12 +347,10 @@ function App() {
           <small>{new Date(item.created_at).toLocaleString('en-GB')}</small>
 
           <div
-            onClick={() => isLongMessage && toggleMessageExpansion(item.id)}
             style={{
               marginTop: '8px',
               whiteSpace: 'pre-wrap',
               overflowWrap: 'anywhere',
-              cursor: isLongMessage ? 'pointer' : 'default',
             }}
           >
             {isLongMessage && !isExpanded ? `${messageText.slice(0, 220)}…` : messageText}
@@ -361,6 +359,7 @@ function App() {
           {isLongMessage && (
             <button
               type="button"
+              aria-expanded={isExpanded}
               onClick={() => toggleMessageExpansion(item.id)}
               style={{ marginTop: '8px', marginLeft: 0 }}
             >
@@ -492,7 +491,7 @@ function App() {
           <label>
             Confirm new password
             <input
-              type="password"
+              type="password'
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
             />
