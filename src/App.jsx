@@ -36,6 +36,26 @@ function App() {
     }
   }, [])
 
+  async function refreshMembership() {
+    if (!session?.user?.id) {
+      setMembership(null)
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('memberships')
+      .select('user_id, role, status, must_change_password')
+      .eq('user_id', session.user.id)
+      .single()
+
+    if (error) {
+      setMembership(null)
+      return
+    }
+
+    setMembership(data)
+  }
+
   useEffect(() => {
     let cancelled = false
     async function loadMembership() {
