@@ -26,7 +26,11 @@ label { display: block; margin: 0.75rem 0; }
 [role="alert"] { color: #a32121; }
 .site-quick-nav { width: min(100%, 980px); margin: 0 auto; text-align: right; }
 .site-footer { width: min(100%, 980px); margin: 2rem auto 0; padding: 1rem 0; border-top: 1px solid #d6dbe1; color: #64748b; font-size: 0.875rem; text-align: center; }
+.community-footer-nav { width: min(100%, 980px); margin: 1.5rem auto 0; padding: 1rem; text-align: center; background: #e8f3ee; border-radius: 8px; }
 .resource-card h3 { margin-bottom: 0.5rem; }
 .resource-card p, .event-description { white-space: pre-wrap; overflow-wrap: anywhere; }
-.event-card h2 { margin-top: 0; }
+.event-card h3 { margin-top: 0; }
+.combined-resources-section { margin-top: 2.5rem; padding-top: 1rem; border-top: 2px solid #d6dbe1; }
+.calendar-download-button { margin-top: 0.5rem; padding: 0.75rem 1rem; color: white; background: #176b53; border: 0; border-radius: 6px; font-weight: 700; }
+.calendar-download-button:hover, .calendar-download-button:focus-visible { background: #10513f; }
 @media (max-width: 600px) { #root { padding: 1rem; } .community-app { margin: 0 auto; } .discussion { --thread-indent: 8px; } }
