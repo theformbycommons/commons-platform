@@ -5,6 +5,9 @@ import AdminApp from './AdminApp.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AdminApp />
+    <>
+      <AdminApp />
+      <footer className="site-footer">© 2026 The Formby Commons</footer>
+    </>
   </StrictMode>,
 )

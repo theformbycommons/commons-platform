@@ -5,6 +5,12 @@ import App from './App.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <>
+      <nav className="site-quick-nav" aria-label="Community pages">
+        <a href="./resources.html">Community resources</a>
+      </nav>
+      <App />
+      <footer className="site-footer">© 2026 The Formby Commons</footer>
+    </>
   </StrictMode>,
 )
