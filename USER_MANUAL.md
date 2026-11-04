@@ -48,9 +48,12 @@ Supabase's built-in Auth email delivery may be restricted on the free tier. This
 1. Open the correct Supabase project dashboard.
 2. Go to **Authentication → Users**.
 3. Choose **Add user** or **Create user** (the wording may vary).
-4. Enter the member's email address and create a unique temporary password.
-5. If the dashboard offers an email-confirmation option, use the setting appropriate to your community's verification process. Do not claim that a manually entered email has been verified unless you are certain that is true.
-6. Create the account and copy its **User UID**. The UID is the link between Auth and the public tables.
+4. Enter the member's email address and create a unique temporary password. If temp password has to be set afterwards, use SQL:
+   update auth.users 
+   set encrypted_password = crypt('NEW_PASSWORD', gen_salt('bf')) 
+   where email = 'user@example.com';
+6. If the dashboard offers an email-confirmation option, use the setting appropriate to your community's verification process. Do not claim that a manually entered email has been verified unless you are certain that is true.
+7. Create the account and copy its **User UID**. The UID is the link between Auth and the public tables.
 
 Do not reuse temporary passwords, ask members to email you a password they want to keep, or store their permanent passwords. Share the temporary password privately. The member should replace it on first sign-in.
 
