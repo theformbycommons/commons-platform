@@ -161,7 +161,11 @@ function AdminApp() {
     <header>
       <h1>Commons administration</h1>
       <p>Signed in as {session.user.email}</p>
-      <nav><a href="./">Member site</a><button onClick={handleLogout}>Sign out</button></nav>
+      <nav>
+  <a href="./">Member site</a>
+  <a href="./events-admin.html">Events &amp; message export</a>
+  <button onClick={handleLogout}>Sign out</button>
+</nav>
     </header>
     {errorMessage && <p role="alert">{errorMessage}</p>}
     <nav className="admin-tabs" aria-label="Admin sections">
