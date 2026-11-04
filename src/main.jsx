@@ -6,11 +6,10 @@ import App from './App.jsx'
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <>
-      <nav className="site-quick-nav" aria-label="Community pages">
-        <a href="./resources.html">Community resources</a>{' · '}
-        <a href="./events.html">Community events</a>
-      </nav>
       <App />
+      <nav className="community-footer-nav" aria-label="Community resources and events">
+        <a href="./events.html">Community resources &amp; calendar</a>
+      </nav>
       <footer className="site-footer">© 2026 The Formby Commons</footer>
     </>
   </StrictMode>,
